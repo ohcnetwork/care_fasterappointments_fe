@@ -10,7 +10,8 @@ overriding registered `care_fe` components, so it needs no change to `care_fe` i
 | Feature                              | What it does                                                                                                                                                  | Enabled by                                  |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | Auto token                           | Right after booking (`?showSuccess=true`), generates a token with the facility's default token category (or the only category if none is default).            | Always on                                   |
-| Auto invoice                         | Issues an invoice for the appointment's billable charge items on the patient's open account. Skipped if there are no charge items or no open account.         | Always on                                   |
+| Auto invoice                         | Issues an invoice for the appointment's billable charge items on the patient's open account. Skipped if there are no charge items or no open account.         | `auto_create_invoice` (on unless `false`)   |
+| Manual invoice button                | When `auto_create_invoice` is `false`, a "Create & Issue Invoice" button in the bottom bar creates and issues the invoice on demand, then continues with the same payment flow. | `auto_create_invoice: false`                |
 | Redirect to invoice                  | After the invoice is issued, opens the invoice's record-payment page (`/pay`), with `sourceUrl` pointing back to the appointment.                             | `redirect_to_invoice`                       |
 | Collect payment on appointment page  | Opens a payment sheet (same look as the host's Collect Payment sheet) on the appointment page. A payment that covers the invoice also marks it as balanced.   | `collect_payment_on_appointment_page`       |
 | Payment pending bar                  | If the sheet is closed without paying, a "Payment Pending" bar with a Collect Payment button stays at the bottom of the appointment page until it is paid.    | `collect_payment_on_appointment_page`       |
@@ -61,6 +62,7 @@ Build-time plugins from `REACT_ENABLED_APPS` are read-only, but `config` from th
     "url": "http://localhost:10126/assets/remoteEntry.js",
     "name": "care_fasterappointments_fe",
     "config": {
+      "auto_create_invoice": true,
       "redirect_to_invoice": false,
       "collect_payment_on_appointment_page": true,
       "mark_balanced_on_full_payment": true,
@@ -73,13 +75,14 @@ Build-time plugins from `REACT_ENABLED_APPS` are read-only, but `config` from th
 
 | Key                                   | Type       | Default | Description                                                                                                       |
 | ------------------------------------- | ---------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `auto_create_invoice`                 | boolean    | `true`  | Issue the invoice automatically after booking. When `false`, a "Create & Issue Invoice" button is shown instead.  |
 | `redirect_to_invoice`                 | boolean    | `false` | Open the invoice's `/pay` page after the invoice is issued. Takes precedence over the in-page payment sheet.      |
 | `collect_payment_on_appointment_page` | boolean    | `false` | Open the payment sheet on the appointment page after booking, and show the pending bar until the invoice is paid. |
 | `print_invoice_on_appointment_page`   | boolean    | `false` | Show the Print Invoice button in the bottom bar.                                                                  |
 | `mark_balanced_on_full_payment`       | boolean    | `false` | Auto-mark an invoice as balanced when a payment recorded in the host's own payment sheet covers it in full.       |
 | `payment_methods`                     | string[]   | all     | Payment methods offered in the appointment-page sheet. Codes: `cash`, `ddpo` (direct deposit), `ccca` (credit card), `debc` (debit card), `chck` (check), `cdac` (credit account). |
 
-All flags default to off, so enabling the plugin alone only generates the token and issues the invoice.
+All flags except `auto_create_invoice` default to off, so enabling the plugin alone generates the token and issues the invoice.
 
 ### Host settings that affect the plugin
 

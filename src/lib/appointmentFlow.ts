@@ -71,22 +71,39 @@ async function generateToken(facilityId: string, appointment: Appointment) {
   return true;
 }
 
-async function issueInvoice(
+// Only billable items are returned, so a re-run never double-bills.
+async function getBillableChargeItems(
   facilityId: string,
-  appointment: Appointment,
-): Promise<Invoice | null> {
-  // Only billable items are returned, so a re-run never double-bills.
+  appointmentId: string,
+) {
   const chargeItems = await request<Paginated<IdOnly>>(
     `/api/v1/facility/${facilityId}/charge_item/`,
     "GET",
     undefined,
     {
       service_resource: "appointment",
-      service_resource_id: appointment.id,
+      service_resource_id: appointmentId,
       status: "billable",
       limit: 100,
     },
   );
+  return chargeItems.results;
+}
+
+export async function hasBillableChargeItems(
+  facilityId: string,
+  appointmentId: string,
+) {
+  return (await getBillableChargeItems(facilityId, appointmentId)).length > 0;
+}
+
+async function issueInvoice(
+  facilityId: string,
+  appointment: Appointment,
+): Promise<Invoice | null> {
+  const chargeItems = {
+    results: await getBillableChargeItems(facilityId, appointment.id),
+  };
   if (chargeItems.results.length === 0) return null;
 
   const accounts = await request<Paginated<IdOnly>>(
@@ -144,10 +161,25 @@ export async function findInvoice(
   );
 }
 
+/** Creates and issues the appointment's invoice on demand; null when there is nothing to bill or no open account. */
+export async function createAndIssueInvoice(
+  facilityId: string,
+  appointmentId: string,
+): Promise<{ invoice: Invoice | null; patientId: string }> {
+  const appointment = await request<Appointment>(
+    `/api/v1/facility/${facilityId}/appointments/${appointmentId}/`,
+  );
+  return {
+    invoice: await issueInvoice(facilityId, appointment),
+    patientId: appointment.patient.id,
+  };
+}
+
 /** Token and invoice are independent: one failing does not block the other. */
 export async function runAppointmentFlow(
   facilityId: string,
   appointmentId: string,
+  autoInvoice: boolean,
 ): Promise<AppointmentFlowResult> {
   const appointment = await request<Appointment>(
     `/api/v1/facility/${facilityId}/appointments/${appointmentId}/`,
@@ -155,7 +187,7 @@ export async function runAppointmentFlow(
 
   const [token, invoice] = await Promise.allSettled([
     generateToken(facilityId, appointment),
-    issueInvoice(facilityId, appointment),
+    autoInvoice ? issueInvoice(facilityId, appointment) : Promise.resolve(null),
   ]);
 
   return {

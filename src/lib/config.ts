@@ -1,6 +1,7 @@
 const SLUG = "care_fasterappointments_fe";
 
 interface FlowConfig {
+  auto_create_invoice?: boolean;
   redirect_to_invoice?: boolean;
   mark_balanced_on_full_payment?: boolean;
   collect_payment_on_appointment_page?: boolean;
