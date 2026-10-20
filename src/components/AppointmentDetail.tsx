@@ -1,0 +1,152 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BadgeCheck, Banknote, Printer } from "lucide-react";
+import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { navigate, usePath, useQueryParams } from "raviger";
+import { toast } from "sonner";
+
+import {
+  findInvoice,
+  type Invoice,
+  runAppointmentFlow,
+} from "@/lib/appointmentFlow";
+import { getFlowConfig } from "@/lib/config";
+import { BUTTON_OUTLINE, BUTTON_PRIMARY, ShortcutBadge } from "./ui";
+
+const CollectPaymentSheet = lazy(() => import("./CollectPaymentSheet"));
+
+interface Props {
+  appointmentId: string;
+  // Injected by the host's override registry.
+  __base?: ComponentType<{ appointmentId: string }>;
+}
+
+// Survives remounts and StrictMode double effects; one run per appointment.
+const handled = new Set<string>();
+
+export default function AppointmentDetail({ __base: Base, ...props }: Props) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const path = usePath();
+  const [{ showSuccess }] = useQueryParams();
+  const [sheetInvoice, setSheetInvoice] = useState<Invoice | null>(null);
+  const facilityId = path?.match(/^\/facility\/([^/]+)\//)?.[1];
+  const { appointmentId } = props;
+
+  const config = getFlowConfig();
+  // Redirecting to the invoice page takes precedence over in-page payment.
+  const collectInPage =
+    !!config.collect_payment_on_appointment_page && !config.redirect_to_invoice;
+  const printEnabled = !!config.print_invoice_on_appointment_page;
+
+  // Under the host's ["chargeItems", facilityId, appointmentId] prefix so its invalidations refresh this too.
+  const { data: appointmentInvoice } = useQuery({
+    queryKey: ["chargeItems", facilityId, appointmentId, "flow-invoice"],
+    queryFn: () => findInvoice(facilityId!, appointmentId),
+    enabled: (collectInPage || printEnabled) && !!facilityId,
+  });
+  const pendingPayment =
+    collectInPage && appointmentInvoice?.status === "issued";
+
+  useEffect(() => {
+    if (!showSuccess || !facilityId || handled.has(appointmentId)) return;
+    handled.add(appointmentId);
+
+    runAppointmentFlow(facilityId, appointmentId)
+      .then(({ tokenGenerated, invoice, patientId }) => {
+        if (tokenGenerated) toast.success(t("fasterappointments__token_generated"));
+        if (invoice) toast.success(t("fasterappointments__invoice_issued"));
+        if (tokenGenerated) {
+          queryClient.invalidateQueries({
+            queryKey: ["appointment", appointmentId],
+          });
+        }
+        if (!invoice) return;
+
+        queryClient.invalidateQueries({
+          queryKey: ["chargeItems", facilityId, appointmentId],
+        });
+        queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+        const flowConfig = getFlowConfig();
+        if (flowConfig.redirect_to_invoice) {
+          const sourceUrl = `/facility/${facilityId}/patient/${patientId}/appointments/${appointmentId}`;
+          navigate(
+            `/facility/${facilityId}/billing/invoices/${invoice.id}/pay?sourceUrl=${encodeURIComponent(sourceUrl)}`,
+          );
+        } else if (flowConfig.collect_payment_on_appointment_page) {
+          setSheetInvoice(invoice);
+        }
+      })
+      .catch(() => handled.delete(appointmentId));
+  }, [showSuccess, facilityId, appointmentId, queryClient, t]);
+
+  return (
+    <>
+      {Base ? <Base {...props} /> : null}
+      {appointmentInvoice &&
+        !sheetInvoice &&
+        (pendingPayment || printEnabled) && (
+          <div
+            role="alert"
+            className="text-sm grid grid-cols-[0_1fr] gap-y-0.5 items-start fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-2xl w-full mx-auto shadow-lg rounded-lg p-0 bg-white border border-gray-200"
+          >
+            <div className="col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight flex items-center justify-between gap-0">
+              {pendingPayment ? (
+                <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-l-lg p-4 flex-1">
+                  <Banknote className="size-5 text-orange-600" />
+                  <span className="font-semibold text-orange-900">
+                    {t("payment_pending")}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-l-lg p-4 flex-1">
+                  <BadgeCheck className="size-5 text-green-600" />
+                  <span className="font-semibold text-green-900">
+                    {appointmentInvoice.status === "balanced"
+                      ? t("paid")
+                      : t("invoice_alert_title")}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center gap-2 bg-white rounded-r-lg p-2 pl-0">
+                {printEnabled && !pendingPayment && (
+                  <a
+                    href={`/facility/${facilityId}/billing/invoice/${appointmentInvoice.id}/print`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate(e.currentTarget.getAttribute("href")!);
+                    }}
+                    className={`${BUTTON_OUTLINE} ml-2`}
+                  >
+                    <Printer />
+                    {t("print_invoice")}
+                    <ShortcutBadge actionId="enter-action" label="ENTER" />
+                  </a>
+                )}
+                {pendingPayment && (
+                  <button
+                    type="button"
+                    className={`${BUTTON_PRIMARY} shadow ml-2`}
+                    onClick={() => setSheetInvoice(appointmentInvoice)}
+                  >
+                    {t("collect_payment")}
+                    <ShortcutBadge actionId="enter-action" label="ENTER" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      {sheetInvoice && facilityId && (
+        <Suspense fallback={null}>
+          <CollectPaymentSheet
+            facilityId={facilityId}
+            invoice={sheetInvoice}
+            onClose={() => setSheetInvoice(null)}
+          />
+        </Suspense>
+      )}
+    </>
+  );
+}

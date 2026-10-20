@@ -1,0 +1,7 @@
+{
+  "fasterappointments__token_generated": "Token generated",
+  "fasterappointments__invoice_issued": "Invoice issued",
+  "fasterappointments__invoice_balanced": "Invoice marked as balanced",
+  "fasterappointments__payment_recorded": "Payment recorded",
+  "fasterappointments__payment_failed": "Error recording payment"
+}
